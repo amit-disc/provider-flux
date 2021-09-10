@@ -27,8 +27,7 @@ import (
 
 // InstallParameters are the configurable fields of a Install.
 type InstallParameters struct {
-	Version   string `json:"version"`
-	Namespace string `json:"namespace"`
+	Version string `json:"version"`
 }
 
 // InstallObservation are the observable fields of a Install.

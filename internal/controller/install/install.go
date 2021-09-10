@@ -103,6 +103,7 @@ type connector struct {
 
 func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.ExternalClient, error) {
 	cr, ok := mg.(*v1alpha1.Install)
+
 	if !ok {
 		return nil, errors.New(errNotKubernetesObject)
 	}
@@ -182,13 +183,12 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 
 func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.ExternalCreation, error) {
 	cr, ok := mg.(*v1alpha1.Install)
-	flux_manifests := generateManifests(cr.Spec.ForProvider.Version, cr.Spec.ForProvider.Namespace)
+	flux_manifests := generateManifests(cr.Spec.ForProvider.Version)
 	if !ok {
 		return managed.ExternalCreation{}, errors.New(errNotKubernetesObject)
 	}
 
 	c.logger.Debug("Creating", "resource", cr)
-	fmt.Printf("------Passed---:")
 	obj, err := getDesired(cr)
 	if err != nil {
 		return managed.ExternalCreation{}, err
@@ -208,7 +208,7 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 
 func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.ExternalUpdate, error) {
 	cr, ok := mg.(*v1alpha1.Install)
-	flux_manifests := generateManifests(cr.Spec.ForProvider.Version, cr.Spec.ForProvider.Namespace)
+	flux_manifests := generateManifests(cr.Spec.ForProvider.Version)
 	if !ok {
 		return managed.ExternalUpdate{}, errors.New(errNotKubernetesObject)
 	}
@@ -279,10 +279,9 @@ func setObserved(obj *v1alpha1.Install, observed *unstructured.Unstructured) err
 	return err
 }
 
-func generateManifests(version string, namespace string) string {
+func generateManifests(version string) string {
 	opt := install.MakeDefaultOptions()
 	opt.Version = string(version)
-	opt.Namespace = string(namespace)
 	manifest, _ := install.Generate(opt, "")
 	return manifest.Content
 }

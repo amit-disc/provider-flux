@@ -60,12 +60,9 @@ spec:
               forProvider:
                 description: InstallParameters are the configurable fields of a Install.
                 properties:
-                  namespace:
-                    type: string
                   version:
                     type: string
                 required:
-                - namespace
                 - version
                 type: object
               providerConfigRef:
