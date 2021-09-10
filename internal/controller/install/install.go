@@ -183,6 +183,7 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.ExternalCreation, error) {
 	cr, ok := mg.(*v1alpha1.Install)
 	flux_manifests := generateManifests(cr.Spec.ForProvider.Version, cr.Spec.ForProvider.Namespace)
+	fmt.Printf("Applying Flux Manifests: %+v", flux_manifests)
 	if !ok {
 		return managed.ExternalCreation{}, errors.New(errNotKubernetesObject)
 	}
