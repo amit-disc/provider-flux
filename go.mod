@@ -1,4 +1,4 @@
-module github.com/crossplane/provider-flux
+module github.com/amit-disc/provider-flux
 
 go 1.16
 
