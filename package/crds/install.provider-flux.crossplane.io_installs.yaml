@@ -4,9 +4,9 @@ metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.6.2
   creationTimestamp: null
-  name: installs.sample.template.crossplane.io
+  name: installs.install.provider-flux.crossplane.io
 spec:
-  group: sample.template.crossplane.io
+  group: install.provider-flux.crossplane.io
   names:
     categories:
     - crossplane

@@ -4,9 +4,9 @@ metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.6.2
   creationTimestamp: null
-  name: providerconfigs.template.crossplane.io
+  name: providerconfigs.provider-flux.crossplane.io
 spec:
-  group: template.crossplane.io
+  group: provider-flux.crossplane.io
   names:
     kind: ProviderConfig
     listKind: ProviderConfigList
@@ -25,7 +25,7 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: A ProviderConfig configures a Template provider.
+        description: A ProviderConfig configures a Flux provider.
         properties:
           apiVersion:
             description: 'APIVersion defines the versioned schema of this representation
