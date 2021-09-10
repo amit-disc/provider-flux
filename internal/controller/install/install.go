@@ -18,10 +18,14 @@ package install
 
 import (
 	"context"
-	"fmt"
+	"encoding/json"
 
 	"github.com/pkg/errors"
+	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/util/workqueue"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -29,6 +33,7 @@ import (
 
 	"github.com/crossplane/crossplane-runtime/pkg/event"
 	"github.com/crossplane/crossplane-runtime/pkg/logging"
+	"github.com/crossplane/crossplane-runtime/pkg/meta"
 	"github.com/crossplane/crossplane-runtime/pkg/ratelimiter"
 	"github.com/crossplane/crossplane-runtime/pkg/reconciler/managed"
 	"github.com/crossplane/crossplane-runtime/pkg/resource"
@@ -59,10 +64,10 @@ func Setup(mgr ctrl.Manager, l logging.Logger, rl workqueue.RateLimiter) error {
 	r := managed.NewReconciler(mgr,
 		resource.ManagedKind(v1alpha1.InstallGroupVersionKind),
 		managed.WithExternalConnecter(&connector{
-			kube:         mgr.GetClient(),
-			usage:        resource.NewProviderConfigUsageTracker(mgr.GetClient(), &apisv1alpha1.ProviderConfigUsage{}),
+			kube:            mgr.GetClient(),
+			usage:           resource.NewProviderConfigUsageTracker(mgr.GetClient(), &apisv1alpha1.ProviderConfigUsage{}),
 			newRestConfigFn: clients.NewRestConfig,
-			newKubeClientFn: clients.NewKubeClient,
+			newKubeClientFn: clients.NewKubeClient}),
 		managed.WithLogger(l.WithValues("controller", name)),
 		managed.WithRecorder(event.NewAPIRecorder(mgr.GetEventRecorderFor(name))))
 
@@ -76,9 +81,9 @@ func Setup(mgr ctrl.Manager, l logging.Logger, rl workqueue.RateLimiter) error {
 // A connector is expected to produce an ExternalClient when its Connect method
 // is called.
 type connector struct {
-	kube         client.Client
-	usage        resource.Tracker
-	newServiceFn func(creds []byte) (interface{}, error)
+	kube            client.Client
+	usage           resource.Tracker
+	newServiceFn    func(creds []byte) (interface{}, error)
 	newRestConfigFn func(kubeconfig []byte) (*rest.Config, error)
 	newKubeClientFn func(config *rest.Config) (client.Client, error)
 }
@@ -259,7 +264,6 @@ func (c *external) Delete(ctx context.Context, mg resource.Managed) error {
 	return errors.Wrap(resource.IgnoreNotFound(c.client.Delete(ctx, obj)), errDeleteInstall)
 }
 
-
 func getLastApplied(obj *v1alpha1.Install, observed *unstructured.Unstructured) (*unstructured.Unstructured, error) {
 	lastApplied, ok := observed.GetAnnotations()[v1.LastAppliedConfigAnnotation]
 	if !ok {
@@ -278,12 +282,11 @@ func getLastApplied(obj *v1alpha1.Install, observed *unstructured.Unstructured) 
 	return last, nil
 }
 
-
 func generateManifests(mg resource.Managed) string {
 	cr, ok := mg.(*v1alpha1.Install)
 	opt := install.MakeDefaultOptions()
-	opt.Version = string(cr.Spec.ForProvider.Version))
-	opt.Namespace = string(cr.Spec.ForProvider.Namespace))	
+	opt.Version = string(cr.Spec.ForProvider.Version)
+	opt.Namespace = string(cr.Spec.ForProvider.Namespace)
 	manifest, _ := install.Generate(opt, "")
 	return manifest.Content
 }

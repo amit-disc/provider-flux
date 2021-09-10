@@ -23,6 +23,7 @@ import (
 	"github.com/crossplane/crossplane-runtime/pkg/logging"
 
 	"github.com/amit-disc/provider-flux/internal/controller/config"
+	"github.com/amit-disc/provider-flux/internal/controller/install"
 )
 
 // Setup creates all Template controllers with the supplied logger and adds them to
