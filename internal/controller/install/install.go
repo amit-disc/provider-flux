@@ -48,16 +48,16 @@ const (
 	errNewClient = "cannot create new Service"
 )
 
-// Setup adds a controller that reconciles MyType managed resources.
+// Setup adds a controller that reconciles Install managed resources.
 func Setup(mgr ctrl.Manager, l logging.Logger, rl workqueue.RateLimiter) error {
-	name := managed.ControllerName(v1alpha1.MyTypeGroupKind)
+	name := managed.ControllerName(v1alpha1.InstallGroupKind)
 
 	o := controller.Options{
 		RateLimiter: ratelimiter.NewDefaultManagedRateLimiter(rl),
 	}
 
 	r := managed.NewReconciler(mgr,
-		resource.ManagedKind(v1alpha1.MyTypeGroupVersionKind),
+		resource.ManagedKind(v1alpha1.InstallGroupVersionKind),
 		managed.WithExternalConnecter(&connector{
 			kube:         mgr.GetClient(),
 			usage:        resource.NewProviderConfigUsageTracker(mgr.GetClient(), &apisv1alpha1.ProviderConfigUsage{}),
@@ -69,7 +69,7 @@ func Setup(mgr ctrl.Manager, l logging.Logger, rl workqueue.RateLimiter) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		Named(name).
 		WithOptions(o).
-		For(&v1alpha1.MyType{}).
+		For(&v1alpha1.Install{}).
 		Complete(r)
 }
 
