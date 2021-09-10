@@ -18,19 +18,20 @@ package install
 
 import (
 	"context"
-	"encoding/json"
+	"fmt"
 
 	"github.com/pkg/errors"
 	v1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/json"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/util/workqueue"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 
+	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
 	"github.com/crossplane/crossplane-runtime/pkg/event"
 	"github.com/crossplane/crossplane-runtime/pkg/logging"
 	"github.com/crossplane/crossplane-runtime/pkg/meta"
@@ -50,7 +51,19 @@ const (
 	errGetPC        = "cannot get ProviderConfig"
 	errGetCreds     = "cannot get credentials"
 
-	errNewClient = "cannot create new Service"
+	errNewClient     = "cannot create new Service"
+	errGetInstall    = "cannot get object"
+	errCreateInstall = "cannot create object"
+	errApplyInstall  = "cannot apply object"
+	errDeleteInstall = "cannot delete object"
+
+	errNotKubernetesObject      = "managed resource is not an Object custom resource"
+	errNewKubernetesClient      = "cannot create new Kubernetes client"
+	errFailedToCreateRestConfig = "cannot create new rest config using provider secret"
+
+	errGetLastApplied          = "cannot get last applied"
+	errUnmarshalTemplate       = "cannot unmarshal template"
+	errFailedToMarshalExisting = "cannot marshal existing resource"
 )
 
 // Setup adds a controller that reconciles Install managed resources.
@@ -129,7 +142,6 @@ func (c *connector) Connect(ctx context.Context, mg resource.Managed) (managed.E
 	}
 
 	return &external{
-		logger: c.logger,
 		client: resource.ClientApplicator{
 			Client:     k,
 			Applicator: resource.NewAPIPatchingApplicator(k),
@@ -145,62 +157,32 @@ type external struct {
 func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.ExternalObservation, error) {
 	cr, ok := mg.(*v1alpha1.Install)
 	if !ok {
-		return managed.ExternalObservation{}, errors.New(errNotKubernetesObject)
+		return managed.ExternalObservation{}, errors.New(errNotMyType)
 	}
 
-	c.logger.Debug("Observing", "resource", cr)
-
-	desired, err := getDesired(cr)
-	if err != nil {
-		return managed.ExternalObservation{}, err
-	}
-
-	observed := desired.DeepCopy()
-
-	err = c.client.Get(ctx, types.NamespacedName{
-		Namespace: observed.GetNamespace(),
-		Name:      observed.GetName(),
-	}, observed)
-
-	if kerrors.IsNotFound(err) {
-		return managed.ExternalObservation{ResourceExists: false}, nil
-	}
-	if err != nil {
-		return managed.ExternalObservation{}, errors.Wrap(err, errGetInstall)
-	}
-
-	if err = setObserved(cr, observed); err != nil {
-		return managed.ExternalObservation{}, err
-	}
-
-	var last *unstructured.Unstructured
-	if last, err = getLastApplied(cr, observed); err != nil {
-		return managed.ExternalObservation{}, errors.Wrap(err, errGetLastApplied)
-	}
-	if last == nil {
-		return managed.ExternalObservation{
-			ResourceExists:   true,
-			ResourceUpToDate: false,
-		}, nil
-	}
-
-	if equality.Semantic.DeepEqual(last, desired) {
-		c.logger.Debug("Up to date!")
-		return managed.ExternalObservation{
-			ResourceExists:   true,
-			ResourceUpToDate: true,
-		}, nil
-	}
+	// These fmt statements should be removed in the real implementation.
+	fmt.Printf("Observing: %+v", cr)
 
 	return managed.ExternalObservation{
-		ResourceExists:   true,
-		ResourceUpToDate: false,
+		// Return false when the external resource does not exist. This lets
+		// the managed resource reconciler know that it needs to call Create to
+		// (re)create the resource, or that it has successfully been deleted.
+		ResourceExists: true,
+
+		// Return false when the external resource exists, but it not up to date
+		// with the desired managed resource state. This lets the managed
+		// resource reconciler know that it needs to call Update.
+		ResourceUpToDate: true,
+
+		// Return any details that may be required to connect to the external
+		// resource. These will be stored as the connection secret.
+		ConnectionDetails: managed.ConnectionDetails{},
 	}, nil
 }
 
 func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.ExternalCreation, error) {
 	cr, ok := mg.(*v1alpha1.Install)
-	flux_manifests := generateManifests()
+	flux_manifests := generateManifests(cr.Spec.ForProvider.Version, cr.Spec.ForProvider.Namespace)
 	if !ok {
 		return managed.ExternalCreation{}, errors.New(errNotKubernetesObject)
 	}
@@ -225,7 +207,7 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 
 func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.ExternalUpdate, error) {
 	cr, ok := mg.(*v1alpha1.Install)
-	flux_manifests := generateManifests()
+	flux_manifests := generateManifests(cr.Spec.ForProvider.Version, cr.Spec.ForProvider.Namespace)
 	if !ok {
 		return managed.ExternalUpdate{}, errors.New(errNotKubernetesObject)
 	}
@@ -282,11 +264,24 @@ func getLastApplied(obj *v1alpha1.Install, observed *unstructured.Unstructured) 
 	return last, nil
 }
 
-func generateManifests(mg resource.Managed) string {
-	cr, ok := mg.(*v1alpha1.Install)
+func getDesired(obj *v1alpha1.Install) (*unstructured.Unstructured, error) {
+	desired := &unstructured.Unstructured{}
+
+	if desired.GetName() == "" {
+		desired.SetName(obj.Name)
+	}
+	return desired, nil
+}
+
+func setObserved(obj *v1alpha1.Install, observed *unstructured.Unstructured) error {
+	var err error
+	return err
+}
+
+func generateManifests(version string, namespace string) string {
 	opt := install.MakeDefaultOptions()
-	opt.Version = string(cr.Spec.ForProvider.Version)
-	opt.Namespace = string(cr.Spec.ForProvider.Namespace)
+	opt.Version = string(version)
+	opt.Namespace = string(namespace)
 	manifest, _ := install.Generate(opt, "")
 	return manifest.Content
 }
