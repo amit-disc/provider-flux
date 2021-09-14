@@ -17,12 +17,17 @@ limitations under the License.
 package install
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 
 	"github.com/pkg/errors"
+	// "gopkg.in/yaml.v2"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/json"
 	"k8s.io/client-go/rest"
@@ -30,6 +35,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/yaml"
 
 	xpv1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
 	"github.com/crossplane/crossplane-runtime/pkg/event"
@@ -43,6 +49,9 @@ import (
 	apisv1alpha1 "github.com/amit-disc/provider-flux/apis/v1alpha1"
 	"github.com/amit-disc/provider-flux/internal/clients"
 	"github.com/fluxcd/flux2/pkg/manifestgen/install"
+
+	goyaml "github.com/go-yaml/yaml"
+	utilyaml "k8s.io/apimachinery/pkg/util/yaml"
 )
 
 const (
@@ -155,6 +164,7 @@ type external struct {
 	client resource.ClientApplicator
 }
 
+// These fmt statements should be removed in the real implementation.
 func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.ExternalObservation, error) {
 	cr, ok := mg.(*v1alpha1.Install)
 	if !ok {
@@ -163,6 +173,10 @@ func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.Ex
 
 	// These fmt statements should be removed in the real implementation.
 	fmt.Printf("Observing: %+v", cr)
+	// desired, err := getDesired(cr)
+	// if err != nil {
+	// 	return managed.ExternalObservation{}, err
+	// }
 
 	return managed.ExternalObservation{
 		// Return false when the external resource does not exist. This lets
@@ -185,26 +199,58 @@ func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.Ext
 	cr, ok := mg.(*v1alpha1.Install)
 	flux_manifests := generateManifests(cr.Spec.ForProvider.Version)
 	if !ok {
-		return managed.ExternalCreation{}, errors.New(errNotKubernetesObject)
+		return managed.ExternalCreation{}, errors.New(errNotMyType)
 	}
 
-	c.logger.Debug("Creating", "resource", cr)
-	obj, err := getDesired(cr)
-	if err != nil {
-		return managed.ExternalCreation{}, err
+	fmt.Printf("Creating: %+v", cr)
+	// obj, err := getDesired(cr)
+	split_yaml, _ := SplitYAML([]byte(flux_manifests))
+	//if err != nil {
+	//	return managed.ExternalCreation{}, err
+	// }
+	// fmt.Printf("Creating Object: %+v", obj)
+	for _, s := range split_yaml {
+		chanObj, _ := DecodeYAML(s)
+		obj := <-chanObj
+		meta.AddAnnotations(obj, map[string]string{
+			v1.LastAppliedConfigAnnotation: flux_manifests,
+		})
+		if err := c.client.Create(ctx, obj); err != nil {
+			return managed.ExternalCreation{}, errors.Wrap(err, errCreateInstall)
+		}
 	}
-
-	meta.AddAnnotations(obj, map[string]string{
-		v1.LastAppliedConfigAnnotation: string(flux_manifests),
-	})
-
-	if err := c.client.Create(ctx, obj); err != nil {
-		return managed.ExternalCreation{}, errors.Wrap(err, errCreateInstall)
-	}
-
-	cr.Status.SetConditions(xpv1.Available())
-	return managed.ExternalCreation{}, setObserved(cr, obj)
+	return managed.ExternalCreation{
+		// Optionally return any details that may be required to connect to the
+		// external resource. These will be stored as the connection secret.
+		ConnectionDetails: managed.ConnectionDetails{},
+	}, nil
 }
+
+// func (c *external) Create(ctx context.Context, mg resource.Managed) (managed.ExternalCreation, error) {
+// 	cr, ok := mg.(*v1alpha1.Install)
+// 	flux_manifests := generateManifests(cr.Spec.ForProvider.Version)
+// 	if !ok {
+// 		fmt.Printf("Gone in loop")
+// 		return managed.ExternalCreation{}, errors.New(errNotKubernetesObject)
+// 	}
+
+// 	c.logger.Debug("Creating", "resource", cr)
+// 	obj, err := getDesired(cr)
+// 	if err != nil {
+// 		return managed.ExternalCreation{}, err
+// 	}
+
+// 	meta.AddAnnotations(obj, map[string]string{
+// 		v1.LastAppliedConfigAnnotation: string(flux_manifests),
+// 	})
+
+// 	if err := c.client.Create(ctx, obj); err != nil {
+// 		return managed.ExternalCreation{}, errors.Wrap(err, errCreateInstall)
+// 	}
+
+// 	cr.Status.SetConditions(xpv1.Available())
+// 	return managed.ExternalCreation{}, setObserved(cr, obj)
+// }
 
 func (c *external) Update(ctx context.Context, mg resource.Managed) (managed.ExternalUpdate, error) {
 	cr, ok := mg.(*v1alpha1.Install)
@@ -266,7 +312,21 @@ func getLastApplied(obj *v1alpha1.Install, observed *unstructured.Unstructured) 
 }
 
 func getDesired(obj *v1alpha1.Install) (*unstructured.Unstructured, error) {
+	flux_manifests := generateManifests(obj.Spec.ForProvider.Version)
 	desired := &unstructured.Unstructured{}
+	yaml.Unmarshal([]byte(flux_manifests), desired)
+	//split_y, _ := SplitYAML([]byte(flux_manifests))
+	//fmt.Printf("Desired manifests %+v", reflect.TypeOf(split_y))
+	// for _, s := range split_y {
+	// 	chanObj, _ := DecodeYAML(s)
+	// 	obj := <-chanObj
+	// 	fmt.Println(obj)
+	// }
+	// fmt.Printf(flux_manifests)
+	// Unmarshal the YAML document into the unstructured object.
+	// desired := &unstructured.Unstructured{}
+	yaml.Unmarshal([]byte(flux_manifests), desired)
+	fmt.Printf("Object Desc: %+v", desired)
 
 	if desired.GetName() == "" {
 		desired.SetName(obj.Name)
@@ -279,9 +339,141 @@ func setObserved(obj *v1alpha1.Install, observed *unstructured.Unstructured) err
 	return err
 }
 
+// func (c *external) Observe(ctx context.Context, mg resource.Managed) (managed.ExternalObservation, error) {
+// 	cr, ok := mg.(*v1alpha1.Install)
+// 	if !ok {
+// 		return managed.ExternalObservation{}, errors.New(errNotKubernetesObject)
+// 	}
+
+// 	c.logger.Debug("Observing", "resource", cr)
+
+// 	desired, err := getDesired(cr)
+// 	if err != nil {
+// 		return managed.ExternalObservation{}, err
+// 	}
+
+// 	observed := desired.DeepCopy()
+
+// 	err = c.client.Get(ctx, types.NamespacedName{
+// 		Namespace: observed.GetNamespace(),
+// 		Name:      observed.GetName(),
+// 	}, observed)
+
+// 	if kerrors.IsNotFound(err) {
+// 		return managed.ExternalObservation{ResourceExists: false}, nil
+// 	}
+// 	if err != nil {
+// 		return managed.ExternalObservation{}, errors.Wrap(err, errGetInstall)
+// 	}
+
+// 	if err = setObserved(cr, observed); err != nil {
+// 		return managed.ExternalObservation{}, err
+// 	}
+
+// 	var last *unstructured.Unstructured
+// 	if last, err = getLastApplied(cr, observed); err != nil {
+// 		return managed.ExternalObservation{}, errors.Wrap(err, errGetLastApplied)
+// 	}
+// 	if last == nil {
+// 		return managed.ExternalObservation{
+// 			ResourceExists:   true,
+// 			ResourceUpToDate: false,
+// 		}, nil
+// 	}
+
+// 	if equality.Semantic.DeepEqual(last, desired) {
+// 		c.logger.Debug("Up to date!")
+// 		return managed.ExternalObservation{
+// 			ResourceExists:   true,
+// 			ResourceUpToDate: true,
+// 		}, nil
+// 	}
+
+// 	return managed.ExternalObservation{
+// 		ResourceExists:   true,
+// 		ResourceUpToDate: false,
+// 	}, nil
+// }
+
 func generateManifests(version string) string {
 	opt := install.MakeDefaultOptions()
 	opt.Version = string(version)
 	manifest, _ := install.Generate(opt, "")
 	return manifest.Content
+}
+
+func SplitYAML(resources []byte) ([][]byte, error) {
+
+	dec := goyaml.NewDecoder(bytes.NewReader(resources))
+
+	var res [][]byte
+	for {
+		var value interface{}
+		err := dec.Decode(&value)
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		valueBytes, err := goyaml.Marshal(value)
+		if err != nil {
+			return nil, err
+		}
+		res = append(res, valueBytes)
+	}
+	return res, nil
+}
+
+func DecodeYAML(data []byte) (<-chan *unstructured.Unstructured, <-chan error) {
+
+	var (
+		chanErr        = make(chan error)
+		chanObj        = make(chan *unstructured.Unstructured)
+		multidocReader = utilyaml.NewYAMLReader(bufio.NewReader(bytes.NewReader(data)))
+	)
+
+	go func() {
+		defer close(chanErr)
+		defer close(chanObj)
+
+		// Iterate over the data until Read returns io.EOF. Every successful
+		// read returns a complete YAML document.
+		for {
+			buf, err := multidocReader.Read()
+			if err != nil {
+				if err == io.EOF {
+					return
+				}
+				chanErr <- errors.Wrap(err, "failed to read yaml data")
+				return
+			}
+
+			// Do not use this YAML doc if it is unkind.
+			var typeMeta runtime.TypeMeta
+			if err := yaml.Unmarshal(buf, &typeMeta); err != nil {
+				continue
+			}
+			if typeMeta.Kind == "" {
+				continue
+			}
+
+			// Define the unstructured object into which the YAML document will be
+			// unmarshaled.
+			obj := &unstructured.Unstructured{
+				Object: map[string]interface{}{},
+			}
+
+			// Unmarshal the YAML document into the unstructured object.
+			if err := yaml.Unmarshal(buf, &obj.Object); err != nil {
+				chanErr <- errors.Wrap(err, "failed to unmarshal yaml data")
+				return
+			}
+
+			// Place the unstructured object into the channel.
+			chanObj <- obj
+		}
+	}()
+
+	return chanObj, chanErr
 }
